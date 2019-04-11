@@ -3,15 +3,15 @@
 #coding: utf8
 from sched.models import Cron_Config
 from utils.logger import logger
-from .assets import AssetsSource
+from .assets import AssetsSource,AssetsBase
 from django.http import QueryDict
 import os,uuid
 from django.core.files.storage import FileSystemStorage
-from utils.ansible_api_v2 import ANSRunner
+from utils.ansible.runner import ANSRunner
 
 
 
-class CrontabManage(object):
+class CrontabManage(AssetsBase):
     def __init__(self):
         super(CrontabManage, self).__init__()  
         self.assets_source = AssetsSource()
@@ -48,7 +48,10 @@ class CrontabManage(object):
         return Cron_Config.objects.all()
         
     def get_assets_list(self,request):
-        return self.allowcator(request.POST.get('server_model'),request.POST.get(request.POST.get('server_model')))
+        assetsList = []
+        for ids in request.POST.get('custom').split(","):
+            assetsList.append(self.assets(ids))
+        return assetsList
     
     def get_assets_source(self,request):   
         return self.assets_source.allowcator(request.POST.get('server_model'),request)

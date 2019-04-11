@@ -1,10 +1,3 @@
-function makeRandomId() {
-  var text = "";
-  var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (var i = 0; i < 8; i++)
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  return text;
-}
 var webssh = false
 function make_terminal(element, size, ws_url) { 
     var term = new Terminal({
@@ -556,21 +549,6 @@ function viewAssets(obj){
 	                '<div class="x_panel">' +
 	                  '<div class="x_title">' +
 	                    '<h2><i class="fa fa-bars"></i>资产明细    <code>'+ obj["text"] +'</code><small>Assets Info</small></h2>' +
-	                    '<ul class="nav navbar-right panel_toolbox">' +
-	                      '<li><a class="collapse-link"><i class="fa fa-chevron-up"></i></a>' +
-	                      '</li>' +
-	                      '<li class="dropdown">' +
-	                        '<a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false"><i class="fa fa-wrench"></i></a>' +
-	                        '<ul class="dropdown-menu" role="menu">' +
-	                          '<li><a href="#">Settings 1</a>' +
-	                          '</li>' +
-	                          '<li><a href="#">Settings 2</a>' +
-	                          '</li>' +
-	                        '</ul>' +
-	                      '</li>' +
-	                      '<li><a class="close-link"><i class="fa fa-close"></i></a>' +
-	                      '</li>' +
-	                    '</ul>' +
 	                    '<div class="clearfix"></div>' +
 	                  '</div>' +
 	                  '<div class="x_content">' +	
@@ -851,9 +829,14 @@ $(document).ready(function () {
 						}else{
 							var icon = "fa fa-desktop assets-offline"
 						}
+						if (response[i]["mark"]){
+							var text = response[i]["ip"]+' | '+response[i]["mark"]
+						}else{
+							var text = response[i]["ip"]
+						}
                         var newNode = {
                                 "id": response[i]["id"]+30000,
-                                "text": response[i]["ip"],
+                                "text": text,
                                 "icon": icon
                             }        						
 						$('#projectTree').jstree('create_node', parent, newNode, position, false, false);	

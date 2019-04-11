@@ -12,7 +12,9 @@ from django.http import HttpResponseRedirect
 from dao.redisdb import DsRedis
 from utils import base
 from dao.assets import AssetsSource
-from utils.ansible_api_v2 import ANSRunner
+from utils.ansible.runner import ANSRunner
+from utils.base import method_decorator_adaptor
+from django.contrib.auth.decorators import permission_required      
         
 class Config(LoginRequiredMixin,AppsManage,View):
     login_url = '/login/'
@@ -23,29 +25,34 @@ class Config(LoginRequiredMixin,AppsManage,View):
             return func(args)
         else:       
             return HttpResponseRedirect('/404/')
-        
+    
+    @method_decorator_adaptor(permission_required, "apps.project_read_project_config","/403/")      
     def config(self,request, *args, **kwagrs):
         return render(request, 'apps/apps_config.html',{"user":request.user,"assets":self.base(),"project_dir":settings.WORKSPACES})
-      
     
+    @method_decorator_adaptor(permission_required, "apps.project_read_project_config","/403/")  
     def info(self,request, *args, **kwagrs):
         res = self.info_apps(request)
         if isinstance(res, str):return JsonResponse({'msg':res,"code":500,'data':[]})
         return JsonResponse({'msg':"添加成功","code":200,'data':res})
-        
+    
+    @method_decorator_adaptor(permission_required, "apps.project_change_project_config","/403/")      
     def init(self,request, *args, **kwagrs):
         res = self.init_apps(request)
         if isinstance(res, str):return JsonResponse({'msg':res,"code":500,'data':[]})
         return JsonResponse({'msg':"操作成功","code":200,'data':[]}) 
     
+    @method_decorator_adaptor(permission_required, "apps.project_change_project_config","/403/")      
     def edit(self,request, *args, **kwagrs):
         return render(request, 'apps/apps_edit.html',{"user":request.user,"assets":self.base(),"project_dir":settings.WORKSPACES})
 
+    @method_decorator_adaptor(permission_required, "apps.project_add_project_config","/403/")      
     def create(self,request, *args, **kwagrs):
         res = self.create_apps(request)
         if isinstance(res, str):return JsonResponse({'msg':res,"code":500,'data':[]})     
         return JsonResponse({'msg':"添加成功","code":200,'data':[]}) 
     
+    @method_decorator_adaptor(permission_required, "apps.project_change_project_config","/403/")  
     def update(self,request, *args, **kwagrs):
         res = self.update_apps(request)
         if isinstance(res, str):return JsonResponse({'msg':res,"code":500,'data':[]})     
@@ -84,6 +91,7 @@ class Manage(LoginRequiredMixin,AppsManage,AssetsSource,View):
         else:       
             return HttpResponseRedirect('/404/')  
     
+    @method_decorator_adaptor(permission_required, "apps.project_read_project_config","/403/")  
     def viewLogs(self,request):
         result = []
         project = self.get_apps(request)
@@ -155,8 +163,8 @@ class Manage(LoginRequiredMixin,AppsManage,AssetsSource,View):
         #获取要排除的文件 
         exclude = ''
         for s in project.project_exclude.split(','):
-            exclude =  "--exclude='{file}'".format(file=s.replace('\r\n','').replace('\n','').strip()) + ' ' + exclude
-        return exclude
+            exclude =  "--exclude={file}".format(file=s.replace('\r\n','').replace('\n','').strip()) + ',' + exclude
+        return exclude[:-1]
     
     def __compile(self,project,version,runIds):
         #执行部署命令  - 编译型语言      
@@ -192,8 +200,8 @@ class Manage(LoginRequiredMixin,AppsManage,AssetsSource,View):
     def __rsync(self,ansRbt,hostList,project,exclude,softdir,runIds):
         #调用ansible同步代码到远程服务器上        
         numbers = self.get_apps_number(project)#[0].dir
-        if numbers:            
-            if exclude:args = '''src={srcDir} dest={desDir} links=yes recursive=yes compress=yes delete=yes rsync_opts="{exclude}"'''.format(srcDir=softdir, desDir=numbers[0].get("dir"),exclude=exclude)
+        if numbers:           
+            if exclude:args = "src={srcDir} dest={desDir} links=yes recursive=yes compress=yes delete=yes rsync_opts='{exclude}'".format(srcDir=softdir, desDir=numbers[0].get("dir"),exclude=exclude)
             else:args = '''src={srcDir} dest={desDir} links=yes recursive=yes compress=yes delete=yes'''.format(srcDir=softdir, desDir=numbers[0].get("dir"))
             ansRbt.run_model(host_list=hostList,module_name='synchronize',module_args=args)
             #精简返回的结果
@@ -242,16 +250,16 @@ class Manage(LoginRequiredMixin,AppsManage,AssetsSource,View):
         if project and version:
             #获取最新版本      
             vList = version.log(path=project.project_repo_dir, number=50)                                
-            return render(request, 'apps/apps_status.html',{"user":request.user,"assets":self.base(),
-                                                            'project':project,'project_data':{
-                                                                'type':project.project_model,
-                                                                'bList':self.bList(project, version),
-                                                                'vList':vList,
-                                                                'number':self.get_number(project),                                                                
+            return render(request, 'apps/apps_status.html',{"user":request.user,'project':project,
+                                                            'project_data':{
+                                                                            'type':project.project_model,
+                                                                            'bList':self.bList(project, version),
+                                                                            'vList':vList,
+                                                                            'number':self.get_number(project),                                                                
                                                                 }})
         else:return HttpResponseRedirect('/404/') 
      
-    
+    @method_decorator_adaptor(permission_required, "apps.project_change_project_config","/403/")  
     def rollback(self,request):
         version,project = self.apps_type(request)
         runIds = request.POST.get('ans_uuid')
@@ -297,7 +305,7 @@ class Manage(LoginRequiredMixin,AppsManage,AssetsSource,View):
             return JsonResponse({'msg':"您无权操作此项","code":500,'data':[]})
                                                  
         
-    
+    @method_decorator_adaptor(permission_required, "apps.project_change_project_config","/403/")  
     def deploy(self,request):
         version,project = self.apps_type(request)
         runIds = request.POST.get('ans_uuid')
@@ -362,25 +370,28 @@ class Manage(LoginRequiredMixin,AppsManage,AssetsSource,View):
         else:                            
             return JsonResponse({'msg':"您无权操作此项","code":500,'data':[]})                    
     
+    @method_decorator_adaptor(permission_required, "apps.project_change_project_config","/403/")  
     def create_branch(self,request):  
         version,project = self.apps_type(request)
-        if request.POST.get('model') == 'branch':
+        if project.project_model == 'branch':
             result = version.createBranch(path=project.project_repo_dir,branchName=request.POST.get('name'))
-        elif request.POST.get('model') == 'tag':
+        elif request.project_model == 'tag':
             result = version.createTag(path=project.project_repo_dir,tagName=request.POST.get('name'))
         if result[0] > 0:return JsonResponse({'msg':result[1],"code":500,'data':[]})
         else:return JsonResponse({'msg':"操作成功","code":200,'data':[]})   
-        
+    
+    @method_decorator_adaptor(permission_required, "apps.project_delete_project_config","/403/")     
     def delete_branch(self,request): 
         version,project = self.apps_type(request)
-        if request.POST.get('model') == 'branch':result = version.delBranch(path=project.project_repo_dir,branchName=request.POST.get('name'))
-        elif request.POST.get('model') == 'tag':result = version.delTag(path=project.project_repo_dir,tagName=request.POST.get('name'))                                  
+        if project.project_model == 'branch':result = version.delBranch(path=project.project_repo_dir,branchName=request.POST.get('name'))
+        elif project.project_model == 'tag':result = version.delTag(path=project.project_repo_dir,tagName=request.POST.get('name'))                                  
         if result[0] > 0:return JsonResponse({'msg':result[1],"code":500,'data':[]})
         else:return JsonResponse({'msg':"操作成功","code":200,'data':[]}) 
     
     def query_repo(self,request):   
         version,project = self.apps_type(request)        
         if project.project_model == 'branch':
+            version.checkOut(path=project.project_repo_dir, name=request.GET.get('name'))
             version.pull(path=project.project_repo_dir)   
             result = version.log(path=project.project_repo_dir,bName=request.GET.get('name'),number=50)
             return JsonResponse({'msg':"操作成功","code":200,'data':result}) 

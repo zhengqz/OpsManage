@@ -1,6 +1,6 @@
 #!/usr/bin/env python  
 # _#_ coding:utf-8 _*_ 
-import uuid
+import uuid,xlrd
 from asset.models import *
 from deploy.models import *
 from databases.models import *
@@ -12,12 +12,12 @@ from django.contrib.auth.models import User,Group
 from utils.logger import logger
 from dao.base import DjangoCustomCursors,DataHandle
 from django.http import QueryDict
-from utils.ansible_api_v2 import ANSRunner
+from utils.ansible.runner import ANSRunner
 from apps.models import Project_Config
 
   
 
-class AssetsBase(DataHandle,DjangoCustomCursors):
+class AssetsBase(DataHandle):
     def __init__(self):
         super(AssetsBase, self).__init__()
         self.uuid = uuid.uuid4()
@@ -62,48 +62,42 @@ class AssetsBase(DataHandle,DjangoCustomCursors):
     
     def manufacturerList(self):
         try:
-            self.execute("""SELECT manufacturer from opsmanage_assets WHERE  manufacturer is not null GROUP BY manufacturer""");
-            return [ ds.get('manufacturer') for ds in self.dictfetchall() ]  
+            return [ ds.manufacturer  for ds in Assets.objects.raw("""SELECT manufacturer,id from opsmanage_assets WHERE  manufacturer is not null GROUP BY manufacturer""")]
         except Exception as ex:
             logger.error(msg="获取设备厂商失败:{ex}".format(ex=ex))
         return []        
 
     def providerList(self):
         try:
-            self.execute("""SELECT provider from opsmanage_assets WHERE  provider is not null GROUP BY provider""");
-            return [ ds.get('provider') for ds in self.dictfetchall() ]  
+            return [ ds.provider  for ds in Assets.objects.raw("""SELECT provider,id from opsmanage_assets WHERE  provider is not null GROUP BY provider""")] 
         except Exception as ex:
             logger.error(msg="获取供应商失败:{ex}".format(ex=ex))
         return []  
 
     def modelList(self):
         try:
-            self.execute("""SELECT model from opsmanage_assets WHERE  model is not null GROUP BY model""");
-            return [ ds.get('model') for ds in self.dictfetchall() ]  
+            return [ ds.model  for ds in Assets.objects.raw("""SELECT model,id from opsmanage_assets WHERE  model is not null GROUP BY model""")]
         except Exception as ex:
             logger.error(msg="获取设备型号失败:{ex}".format(ex=ex))
         return [] 
     
     def cpuList(self):
         try:
-            self.execute("""SELECT cpu from opsmanage_server_assets WHERE  cpu is not null GROUP BY cpu""");
-            return [ ds.get('cpu') for ds in self.dictfetchall() ]  
+            return [ ds.cpu  for ds in Server_Assets.objects.raw("""SELECT cpu,id from opsmanage_server_assets WHERE  cpu is not null GROUP BY cpu""")]
         except Exception as ex:
             logger.error(msg="获取cpu型号失败:{ex}".format(ex=ex))
         return [] 
                
     def systemList(self):
         try:
-            self.execute("""SELECT system from opsmanage_server_assets WHERE  system is not null GROUP BY system""");
-            return [ ds.get('system') for ds in self.dictfetchall() ]  
+            return [ ds.system  for ds in Server_Assets.objects.raw("""SELECT system,id from opsmanage_server_assets WHERE  system is not null GROUP BY system""")]
         except Exception as ex:
             logger.error(msg="获取操作系统失败:{ex}".format(ex=ex))
         return [] 
     
     def kernelList(self):
         try:
-            self.execute("""SELECT kernel from opsmanage_server_assets WHERE  kernel is not null GROUP BY kernel""");
-            return [ ds.get('kernel') for ds in self.dictfetchall() ]  
+            return [ ds.kernel  for ds in Server_Assets.objects.raw("""SELECT kernel,id from opsmanage_server_assets WHERE  kernel is not null GROUP BY kernel""")]
         except Exception as ex:
             logger.error(msg="获取内核版本失败:{ex}".format(ex=ex))
         return []     
@@ -170,13 +164,29 @@ class AssetsBase(DataHandle,DjangoCustomCursors):
                                                       
         
     
-#     def tags(self,tags,request=None):
-#         tagAssetsList = [ ds.aid for ds in Tags_Server_Assets.objects.filter(tid=tags)]
-#         allAssetsList = self.assetsList()
-#         #取差集
-#         diffAsset = [i for i in allAssetsList if i not in tagAssetsList]      
-#         return self.query(tagAssetsList),self.query(diffAsset)        
-       
+    def check_user_assets(self,userid,assetsid):
+        try:
+            user = User.objects.get(id=userid)
+        except Exception as ex:
+            logger.warn(msg="查询用户信息失败: {ex}".format(ex=str(ex)))  
+            return False
+        try:
+            assets = Assets.objects.get(id=assetsid)
+        except Exception as ex:
+            logger.warn(msg="查询资产信息失败: {ex}".format(ex=str(ex)))  
+            return False  
+        
+        if user.is_superuser and assets:
+            return assets
+        
+        if not user.is_superuser and assets \
+            and user.has_perm('asset.assets_webssh_server'): 
+            try:     
+                if User_Server.objects.get(user=user,assets=assets):return assets
+            except Exception as ex:
+                logger.warn(msg="查询用户资产信息失败: {ex}".format(ex=str(ex)))  
+                return False        
+        return False
     
     def query_user_assets(self,request,assetsList):
         if request.user.is_superuser:
@@ -238,12 +248,12 @@ class AssetsBase(DataHandle,DjangoCustomCursors):
                 logger.warn(msg="查询主机应用信息失败: {ex}".format(ex=str(ex)))             
             if hasattr(assets,'server_assets'):
                 try:
-                    dataList.append({"id":assets.id,"ip":assets.server_assets.ip,"project":project,"service":service,"status":assets.status})                       
+                    dataList.append({"id":assets.id,"ip":assets.server_assets.ip,"project":project,"service":service,"status":assets.status,"mark":assets.mark})                       
                 except Exception as ex:
                     logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex))                    
             elif hasattr(assets,'network_assets'):
                 try:
-                    dataList.append({"id":assets.id,"ip":assets.network_assets.ip,"project":project,"service":service,"status":assets.status})                       
+                    dataList.append({"id":assets.id,"ip":assets.network_assets.ip,"project":project,"service":service,"status":assets.status,"mark":assets.mark})                       
                 except Exception as ex:
                     logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex))  
         return dataList                   
@@ -331,7 +341,94 @@ class AssetsBase(DataHandle,DjangoCustomCursors):
             data['network'] = self.get_network(assets)  
             data['tags'] = self.assets_tags(assets)      
         return data      
-
+    
+    def read_import_file(self,filename):
+        bk = xlrd.open_workbook(filename)
+        dataList = []
+        try:
+            server = bk.sheet_by_name("server")
+            net = bk.sheet_by_name("net")
+            for i in range(1,server.nrows):
+                dataList.append(server.row_values(i)) 
+            for i in range(1,net.nrows):
+                dataList.append(net.row_values(i))     
+        except Exception as ex:
+            logger.warn(msg="读取导入的资产文件失败: {ex}".format(ex=str(ex)))  
+            return "读取导入的资产文件失败: {ex}".format(ex=str(ex))    
+        return dataList      
+    
+    def import_assets(self,filename):
+        dataList = self.read_import_file(filename)
+        if isinstance(dataList, str):return dataList
+        #获取服务器列表
+        for data in dataList:
+            assets = {
+                      'assets_type':data[0],
+                      'name':data[1],
+                      'sn':data[2],
+                      'buy_user':int(data[5]),
+                      'management_ip':data[6],
+                      'manufacturer':data[7],
+                      'model':data[8],
+                      'provider':data[9],
+                      'status':int(data[10]),
+                      'put_zone':int(data[11]),
+                      'group':int(data[12]),
+                      'project':int(data[13]),
+                      'business':int(data[14]),
+                      }
+            if data[3]:assets['buy_time'] = xlrd.xldate.xldate_as_datetime(data[3],0)
+            if data[4]:assets['expire_date'] = xlrd.xldate.xldate_as_datetime(data[4],0)
+            if assets.get('assets_type') in ['vmser','server']:
+                server_assets = {
+                          'ip':data[15],
+                          'keyfile':data[16],
+                          'username':data[17],
+                          'passwd':data[18],
+                          'hostname':data[19],
+                          'port':data[20],
+                          'raid':data[21],
+                          'line':data[22],
+                          } 
+            else:
+                net_assets = {
+                            'ip':data[15],
+                            'bandwidth':data[16],
+                            'port_number': data[17],
+                            'firmware':data[18],
+                            'cpu':data[19],
+                            'stone':data[20],
+                            'configure_detail': data[21]                              
+                              }                                                  
+            count = Assets.objects.filter(name=assets.get('name')).count()
+            if count == 1:
+                assetsObj = Assets.objects.get(name=assets.get('name'))
+                Assets.objects.filter(name=assets.get('name')).update(**assets)
+                try:
+                    if assets.get('assets_type') in ['vmser','server']:
+                        Server_Assets.objects.filter(assets=assetsObj).update(**server_assets)
+                    elif assets.get('assets_type') in ['switch','route','printer','scanner','firewall','storage','wifi']:
+                        Network_Assets.objects.filter(assets=assetsObj).update(**net_assets)
+                except  Exception as ex:
+                    logger.warn(msg="批量更新资产失败: {ex}".format(ex=str(ex)))
+                    return "批量更新资产失败: {ex}".format(ex=str(ex))
+            else:
+                try:
+                    assetsObj = Assets.objects.create(**assets)   
+                except Exception as ex:
+                    logger.warn(msg="批量写入资产失败: {ex}".format(ex=str(ex)))
+                    return "批量写入资产失败: {ex}".format(ex=str(ex))
+                if assetsObj:
+                    try:  
+                        if assets.get('assets_type') in ['vmser','server']:
+                            Server_Assets.objects.create(assets=assetsObj,**server_assets)
+                        elif assets.get('assets_type') in ['switch','route','printer','scanner','firewall','storage','wifi']:
+                            Network_Assets.objects.create(assets=assetsObj,**net_assets)                          
+                    except Exception as ex:
+                        logger.warn(msg="批量更新资产失败: {ex}".format(ex=str(ex)))                        
+                        assetsObj.delete()
+                        return "批量更新资产失败: {ex}".format(ex=str(ex))
+               
 
 
 class AssetsCount(DjangoCustomCursors):
@@ -810,7 +907,6 @@ class AssetsSource(object):
                                                          device_brand= mem.get('manufacturer'),device_volume=mem.get('size'),
                                                          device_status=1,assets=assets
                                                          )
-#                                 recordAssets.delay(user=str(request.user),content="修改服务器资产：{ip}".format(ip=server_assets.ip),type="server",id=server_assets.id)
                                 if sip not in sList:sList.append(sip)
                             except Exception as ex:
                                 if sip not in fList:fList.append(sip) 
@@ -834,7 +930,6 @@ class AssetsSource(object):
                                                          device_brand= disk.get('manufacturer'),device_volume=disk.get('size'),
                                                          device_status=1,assets=assets,device_slot=disk.get('slot')
                                                          )
-#                                 recordAssets.delay(user=str(request.user),content="修改服务器资产：{ip}".format(ip=server_assets.ip),type="server",id=server_assets.id)
                                 if sip not in sList:sList.append(sip)
                             except Exception as ex:
                                 if sip not in fList:fList.append(sip)
@@ -842,6 +937,129 @@ class AssetsSource(object):
             return fList, sList
         else:
             return result,[]
+
+class AssetsAnsible(DataHandle):
+    def __init__(self):
+        super(AssetsAnsible,self).__init__()      
+        
+    def allowcator(self,sub,request):
+        if hasattr(self,sub):
+            func= getattr(self,sub)
+            return func(request)
+        else:
+            logger.error(msg="AssetsAnsible没有{sub}方法".format(sub=sub))       
+            
+              
+    def query_user_assets(self,request,assetsList):
+        if request.get('is_superuser'):
+            return  assetsList   
+        assets_list =[ das.assets for das in User_Server.objects.filter(user=request.get('user'),assets_id__in=[ ds.id for ds in assetsList ])]          
+        return assets_list        
+            
+    def custom(self,request):
+        assetsList = Assets.objects.select_related().filter(id__in=request.get('custom'))
+        return self.source(self.query_user_assets(request, assetsList))    
+    
+    def tags(self,request):
+        assetsList = [ ds.aid for ds in Tags_Server_Assets.objects.filter(tid=request.get('tags'))]
+        return self.source(self.query_user_assets(request, assetsList))      
+    
+    def group(self,request):
+        assetsList = Assets.objects.select_related().filter(group=request.get('group'),assets_type__in=["server","vmser","switch","route"])
+        return self.source(self.query_user_assets(request, assetsList))
+                
+    def service(self,request):
+        assetsList = Assets.objects.select_related().filter(business=request.get('service'),assets_type__in=["server","vmser","switch","route"])
+        return self.source(self.query_user_assets(request, assetsList))
+    
+    def inventory_groups(self,request):   
+        sList = []
+        resource = {} 
+        group_name = ''
+        try:
+            inventoryGroup = Deploy_Inventory_Groups.objects.get(id=request.get('inventory_groups'))
+            group_name = inventoryGroup.group_name
+        except Exception as ex: 
+            logger.warn(msg="资产组查询失败：{id}".format(id=request.get('inventory_groups'),ex=ex))
+        resource[inventoryGroup.group_name] = {}
+        hosts = []
+        for ser in inventoryGroup.inventory_group_server.all():
+            assets =  Assets.objects.get(id=ser.server)
+            data = {}
+            if hasattr(assets,'server_assets'):
+                try:
+                    serverIp = assets.server_assets.ip
+                    data["ip"] = serverIp
+                    data["port"] = int(assets.server_assets.port)
+                    data["username"] = assets.server_assets.username
+                    data["hostname"] = assets.server_assets.ip
+                    data["sudo_passwd"] = assets.server_assets.sudo_passwd                        
+                    if assets.server_assets.keyfile != 1:data["password"] =  assets.server_assets.passwd
+                except Exception as ex:
+                    logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex))                     
+            elif hasattr(assets,'network_assets'):                 
+                try:
+                    serverIp = assets.network_assets.ip
+                    data["ip"] = serverIp
+                    data["port"] = int(assets.network_assets.port)
+                    data["password"] = assets.network_assets.passwd
+                    data["hostname"] = assets.network_assets.ip
+                    data["username"] = assets.network_assets.username
+                    data["sudo_passwd"] = assets.network_assets.sudo_passwd
+                    data["connection"] = 'local'
+                except Exception as ex:
+                    logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex))
+            if assets.host_vars:
+                try:                         
+                    for k,v in eval(assets.host_vars).items():
+                        if k not in ["ip", "port", "username", "password","ip"]:data[k] = v
+                except Exception as ex:
+                    logger.warn(msg="资产: {assets},转换host_vars失败:{ex}".format(assets=assets.id,ex=ex))                        
+            if serverIp not in sList:sList.append(serverIp)
+            hosts.append(data)
+            resource[group_name]['hosts'] = hosts 
+            try:
+                if inventoryGroup.ext_vars:resource[group_name]['vars'] = eval(inventoryGroup.ext_vars)  
+            except Exception as ex: 
+                logger.warn(msg="资产组变量转换失败: {id} {ex}".format(id=request.get('inventory_groups'),ex=ex))
+                resource[inventoryGroup.group_name]['vars'] = None
+        return sList, resource     
+                
+    def source(self,assetsList): 
+        sList,resource = [],[]                            
+        for assets in assetsList:
+            data = {}
+            if hasattr(assets,'server_assets'):
+                try:
+                    sList.append(assets.server_assets.ip)
+                    data["ip"] = assets.server_assets.ip
+                    data["port"] = int(assets.server_assets.port)
+                    data["username"] = assets.server_assets.username
+                    data["hostname"] = assets.server_assets.ip
+                    data["sudo_passwd"] = assets.server_assets.sudo_passwd
+                    if assets.server_assets.keyfile == 0:data["password"] =  assets.server_assets.passwd                         
+                except Exception as ex:
+                    logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex))                    
+            elif hasattr(assets,'network_assets'):
+                try:
+                    sList.append(assets.network_assets.ip)
+                    data["ip"] = assets.network_assets.ip
+                    data["port"] = int(assets.network_assets.port)
+                    data["password"] = assets.network_assets.passwd
+                    data["hostname"] = assets.network_assets.ip
+                    data["username"] = assets.network_assets.username
+                    data["sudo_passwd"] = assets.network_assets.sudo_passwd
+                    data["connection"] = 'local'
+                except Exception as ex:
+                    logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex))   
+            if assets.host_vars:
+                try:                         
+                    for k,v in eval(assets.host_vars).items():
+                        if k not in ["ip", "port", "username", "password","ip"]:data[k] = v
+                except Exception as ex:
+                    logger.warn(msg="资产: {assets},转换host_vars失败:{ex}".format(assets=assets.id,ex=ex)) 
+            resource.append(data)
+        return sList,resource    
         
 ASSETS_COUNT_RBT = AssetsCount()    
 ASSETS_BASE = AssetsBase()

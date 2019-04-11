@@ -1,14 +1,17 @@
 #!/usr/bin/env python  
 # _#_ coding:utf-8 _*_  
+import os
 from django.views.generic import View
 from django.http import QueryDict
-from django.shortcuts import render
+from django.shortcuts import render,HttpResponseRedirect
 from django.contrib.auth.mixins import LoginRequiredMixin
 from .models import Assets,Server_Assets,NetworkCard_Assets
 from dao.assets import AssetsBase,AssetsSource
 from utils.logger import logger
 from django.http import JsonResponse
-
+from django.contrib.auth.decorators import permission_required
+from utils.base import method_decorator_adaptor
+from asset.models import Network_Assets
 
         
 class Config(LoginRequiredMixin,AssetsBase,View):
@@ -20,6 +23,7 @@ class Config(LoginRequiredMixin,AssetsBase,View):
 class AssetsManage(LoginRequiredMixin,AssetsBase,View):
     login_url = '/login/'  
     
+    @method_decorator_adaptor(permission_required, "asset.assets_read_assets","/403/")   
     def get(self, request, *args, **kwagrs):
         if request.GET.get('id') and request.GET.get('model')=='edit':
             return render(request, 'assets/assets_modf.html',{"user":request.user,"assets":self.assets(id=request.GET.get('id')),"assetsBase":self.base()}) 
@@ -30,12 +34,14 @@ class AssetsManage(LoginRequiredMixin,AssetsBase,View):
          
 class AssetsList(LoginRequiredMixin,AssetsBase,View):
     login_url = '/login/'  
+    @method_decorator_adaptor(permission_required, "asset.assets_read_assets","/403/")   
     def get(self, request, *args, **kwagrs):
         return render(request, 'assets/assets_list.html',{"user":request.user,"assets":self.base(),"assetsList":self.assetsList()})   
     
     
 class AssetsTree(LoginRequiredMixin,AssetsBase,View):
     login_url = '/login/'  
+    @method_decorator_adaptor(permission_required, "asset.assets_read_assets","/403/")   
     def get(self, request, *args, **kwagrs):
         return render(request, 'assets/assets_tree.html',{"user":request.user})     
 
@@ -133,7 +139,7 @@ class AssetsSearch(LoginRequiredMixin,AssetsBase,View):
             except:
                 pass 
 
-        if data.has_key('ip'):
+        if set(["ip"]).issubset(data):
             for ds in NetworkCard_Assets.objects.filter(ip=data.get('ip')):
                 if ds.assets not in assetsList:assetsList.append(ds.assets) 
   
@@ -159,18 +165,13 @@ class AssetsSearch(LoginRequiredMixin,AssetsBase,View):
         baseAssets = self.base()
         dataList = []
         for a in assetsList:
-            nks = ''
-            if a.server_assets.ip:
-                liTags = ''
-                for ns in a.networkcard_assets_set.all():
-                    if ns.ip != 'unkown' and ns.ip !=  a.server_assets.ip:
-                        liTag = '''<li>{address}</li>'''.format(address=ns.ip) 
-                        liTags = liTags + liTag
-                nks = '''<ul class="list-unstyled">
-                            <li>{server_ip}</li>
-                            {liTags}
-                        </ul>'''.format(server_ip=a.server_assets.ip,liTags=liTags)
-            management_ip = '''{ip}'''.format(ip=nks)  
+            if hasattr(a,'server_assets'):
+                sip = a.server_assets.ip
+            elif hasattr(a,'network_assets'):
+                sip = a.network_assets.ip
+            else:
+                sip = '未知'
+            management_ip = '''{ip}'''.format(ip=sip)  
             try:  
                 system = a.server_assets.system
             except:
@@ -198,7 +199,7 @@ class AssetsSearch(LoginRequiredMixin,AssetsBase,View):
             for z in baseAssets.get('zoneList'):
                 if z.id == a.put_zone:put_zone = '''{zone_name}'''.format(zone_name=z.zone_name)      
             opt = ''' <div class="btn-group btn-group-sm">                
-                    <button type="button" name="btn-assets-alter" value="{id}" class="btn btn-default" aria-label="Center Align"><a href="/assets/add/?id={id}" target="view_window"><span class="glyphicon glyphicon-check" aria-hidden="true"></span></a>
+                    <button type="button" name="btn-assets-alter" value="{id}" class="btn btn-default" aria-label="Center Align"><a href="/assets/manage/?id={id}&model=edit" target="view_window"><span class="glyphicon glyphicon-check" aria-hidden="true"></span></a>
                     </button>
                     <button type="button" name="btn-assets-info" value="{id}" class="btn btn-default" aria-label="Right Align" data-toggle="modal" data-target=".bs-example-modal-info"><span class="glyphicon glyphicon-info-sign" aria-hidden="true"></span>
                     </button>
@@ -229,13 +230,16 @@ class AssetsSearch(LoginRequiredMixin,AssetsBase,View):
 class AssetsBatch(LoginRequiredMixin,AssetsSource,View):  
     login_url = '/login/'  
     fList = []
-    sList = []        
+    sList = []    
+    
+    @method_decorator_adaptor(permission_required, "asset.assets_change_assets","/403/")     
     def post(self, request, *args, **kwagrs):
         fList,sList = self.allowcator(request.POST.get('model'),request)                     
         if sList:
             return JsonResponse({'msg':"数据更新成功","code":200,'data':{"success":sList,"failed":fList}}) 
         else:return JsonResponse({'msg':fList,"code":500,'data':{"success":sList,"failed":fList}})     
-        
+    
+    @method_decorator_adaptor(permission_required, "asset.assets_delete_assets","/403/")     
     def delete(self, request, *args, **kwagrs):
         for ast in QueryDict(request.body).getlist('assetsIds[]'):
             try:
@@ -262,4 +266,20 @@ class AssetsBatch(LoginRequiredMixin,AssetsSource,View):
                 self.sList.append(assets.management_ip)
                 net_assets.delete()                    
             assets.delete()                                    
-        return JsonResponse({'msg':"数据删除成功","code":200,'data':{"success":self.sList,"failed":self.fList}})                
+        return JsonResponse({'msg':"数据删除成功","code":200,'data':{"success":self.sList,"failed":self.fList}})             
+    
+class AssetsImport(LoginRequiredMixin,AssetsBase,View):       
+    login_url = '/login/' 
+    
+    @method_decorator_adaptor(permission_required, "asset.assets_add_assets","/403/")   
+    def post(self, request, *args, **kwagrs):
+        f = request.FILES.get('import_file')
+        filename = os.path.join(os.getcwd() + '/upload/',f.name)
+        if os.path.isdir(os.path.dirname(filename)) is not True:os.makedirs(os.path.dirname(filename))
+        fobj = open(filename,'wb')
+        for chrunk in f.chunks():
+            fobj.write(chrunk)
+        fobj.close()
+        res = self.import_assets(filename)
+        if isinstance(res, str):return JsonResponse({'msg':res,"code":500,'data':[]})
+        return HttpResponseRedirect('/user/center/')       

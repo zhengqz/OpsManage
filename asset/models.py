@@ -55,10 +55,10 @@ class Server_Assets(models.Model):
     ip = models.CharField(max_length=100,unique=True,blank=True,null=True) 
     hostname = models.CharField(max_length=100,blank=True,null=True)  
     username = models.CharField(max_length=100,blank=True,null=True)  
-    passwd = models.CharField(max_length=100,blank=True,null=True)  
+    passwd = models.CharField(max_length=100,default='root',blank=True,null=True)  
     sudo_passwd = models.CharField(max_length=100,blank=True,null=True)
     keyfile =  models.SmallIntegerField(blank=True,null=True)#FileField(upload_to = './upload/key/',blank=True,null=True,verbose_name='密钥文件')
-    port = models.DecimalField(max_digits=6,decimal_places=0,blank=True,null=True)
+    port = models.DecimalField(max_digits=6,decimal_places=0,default=22)
     line = models.SmallIntegerField(blank=True,null=True)
     cpu = models.CharField(max_length=100,blank=True,null=True)
     cpu_number = models.SmallIntegerField(blank=True,null=True)
@@ -96,7 +96,7 @@ class Network_Assets(models.Model):
     username = models.CharField(max_length=100,blank=True,null=True)
     passwd = models.CharField(max_length=100,blank=True,null=True) 
     sudo_passwd = models.CharField(max_length=100,blank=True,null=True) 
-    port = models.DecimalField(max_digits=6,decimal_places=0,blank=True,null=True)    
+    port = models.DecimalField(max_digits=6,decimal_places=0,default=22)    
     port_number = models.SmallIntegerField(blank=True,null=True,verbose_name='端口个数')
     firmware =  models.CharField(max_length=100,blank=True,null=True,verbose_name='固件版本')
     cpu = models.CharField(max_length=100,blank=True,null=True,verbose_name='cpu型号')
@@ -318,6 +318,12 @@ class User_Server(models.Model):
     class Meta:
         db_table = 'opsmanage_user_assets'
         default_permissions = ()
+        permissions = (
+            ("assets_add_user", "添加用户权限"),
+            ("assets_change_user", "修改用户权限"),
+            ("assets_delete_user", "删除用户权限"),  
+            ("assets_read_user", "读取用户权限"),            
+        )         
         unique_together = (("assets", "user"))
         verbose_name = '用户资产表'  
         verbose_name_plural = '用户资产表'                           
